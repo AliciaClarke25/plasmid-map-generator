@@ -161,6 +161,19 @@ with st.sidebar:
     st.header("⚙️ Settings")
     font_size = st.slider("Label Font Size", min_value=8, max_value=20, value=11, step=1)
     st.markdown("---")
+    st.header("🎨 Color Palette")
+    
+    # Organized color categories with visual indicators
+    st.markdown("**✨ Pastel Colors:**")
+    st.markdown("lightblue, lightcoral, lightgreen, lightpink, lightsalmon, lightyellow, lavender, mistyrose, peachpuff, powderblue, paleturquoise, thistle, plum, wheat")
+    
+    st.markdown("**🌈 Bright Colors:**")
+    st.markdown("red, blue, green, yellow, orange, purple, cyan, magenta, lime, hotpink")
+    
+    st.markdown("**🎯 Standard Colors:**")
+    st.markdown("forestgreen, dodgerblue, brown, gold, coral, darkorchid, darkturquoise, teal, olive")
+    
+    st.markdown("---")
     st.header("📖 Quick Guide")
     st.markdown("""
     **Required Columns:**
@@ -267,11 +280,23 @@ with tab2:
         
         with col2:
             box_pos = st.selectbox("Box Position", ["Up", "Down"])
+            
+            # Organized color list with pastels
             colour = st.selectbox("Colour", [
-                'blue', 'green', 'red', 'purple', 'gold', 'orange', 'brown',
-                'dodgerblue', 'forestgreen', 'darkred', 'darkorchid',
-                'darkturquoise', 'aquamarine', 'coral'
+                # Pastel colors
+                'lightblue', 'lightcoral', 'lightgreen', 'lightpink', 
+                'lightsalmon', 'lightyellow', 'lavender', 'mistyrose',
+                'peachpuff', 'powderblue', 'paleturquoise', 'thistle',
+                'plum', 'wheat',
+                # Bright colors
+                'blue', 'green', 'red', 'purple', 'gold', 'orange', 
+                'yellow', 'cyan', 'magenta', 'lime', 'hotpink',
+                # Standard colors
+                'brown', 'dodgerblue', 'forestgreen', 'darkred', 
+                'darkorchid', 'darkturquoise', 'aquamarine', 'coral',
+                'teal', 'olive'
             ])
+            
             arrow_type = st.selectbox("Arrow Type", ["arrow", "flat"])
         
         col_add, col_clear = st.columns([1, 1])
