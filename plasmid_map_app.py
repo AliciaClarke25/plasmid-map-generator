@@ -65,8 +65,19 @@ def parse_genbank_file(uploaded_file):
         return None
     
     try:
+        # Convert Streamlit's UploadedFile to text mode for BioPython
+        from io import StringIO
+        
+        # Read the file content and decode if necessary
+        file_content = uploaded_file.read()
+        if isinstance(file_content, bytes):
+            file_content = file_content.decode('utf-8')
+        
+        # Create a StringIO object for BioPython
+        text_file = StringIO(file_content)
+        
         # Parse the GenBank file
-        record = SeqIO.read(uploaded_file, "genbank")
+        record = SeqIO.read(text_file, "genbank")
         plasmid_length = len(record.seq)
         
         elements_data = []
@@ -756,6 +767,6 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
-    🧬 Plasmid Map Generator v2.0 | With Arrow Promoters & Element Control | 500 DPI Output
+    🧬 Plasmid Map Generator v2.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke
 </div>
 """, unsafe_allow_html=True)
