@@ -245,8 +245,15 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
         
         # Add element name with rotation if vertical
         if text_orientation == 'vertical':
-            ax.text(center, text_y, element, ha='center', va='bottom' if position == "Up" else 'top',
-                   fontsize=label_font, rotation=90, rotation_mode='anchor')
+            # For vertical text (rotated 90°), alignment works differently
+            # ha='left' means text extends upward after rotation (for Up position)
+            # ha='right' means text extends downward after rotation (for Down position)
+            if position == "Up":
+                ax.text(center, text_y, element, ha='left', va='center',
+                       fontsize=label_font, rotation=90, rotation_mode='anchor')
+            else:
+                ax.text(center, text_y, element, ha='right', va='center',
+                       fontsize=label_font, rotation=90, rotation_mode='anchor')
         else:
             ax.text(center, text_y, element, ha='center', va='bottom' if position == "Up" else 'top',
                    fontsize=label_font)
@@ -789,6 +796,6 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
-    🧬 Plasmid Map Generator v2.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke
+    🧬 Plasmid Map Generator v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke
 </div>
 """, unsafe_allow_html=True)
