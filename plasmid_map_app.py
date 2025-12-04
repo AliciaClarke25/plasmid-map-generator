@@ -353,7 +353,14 @@ with tab1:
                 if 'position_prefs' not in st.session_state:
                     st.session_state.position_prefs = {}
                 if 'enabled_elements' not in st.session_state:
-                    st.session_state.enabled_elements = {elem: True for elem in df['Element'].tolist()}
+                    st.session_state.enabled_elements = {}
+                
+                # Initialize enabled state for all elements using unique keys
+                for idx, row in df.iterrows():
+                    element = row['Element']
+                    unique_key = f"{idx}_{element}"
+                    if unique_key not in st.session_state.enabled_elements:
+                        st.session_state.enabled_elements[unique_key] = True
                 
                 # Region selection
                 st.markdown("---")
@@ -388,6 +395,9 @@ with tab1:
                         is_promoter = row.get('IsPromoter', False)
                         strand = row.get('Strand', 1)
                         
+                        # Create unique key using both index and element name to avoid duplicates
+                        unique_key = f"{idx}_{element}"
+                        
                         # Create columns for each element's controls
                         col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
                         
@@ -401,45 +411,57 @@ with tab1:
                         
                         with col2:
                             # Color selector
-                            current_color = st.session_state.color_prefs.get(element, row['Color'])
+                            current_color = st.session_state.color_prefs.get(unique_key, row['Color'])
                             new_color = st.selectbox(
                                 f"Color",
                                 options=ALL_COLORS,
                                 index=ALL_COLORS.index(current_color) if current_color in ALL_COLORS else 0,
-                                key=f"color_{element}"
+                                key=f"color_{unique_key}",
+                                label_visibility="collapsed"
                             )
-                            st.session_state.color_prefs[element] = new_color
+                            st.session_state.color_prefs[unique_key] = new_color
                         
                         with col3:
                             # Position selector
-                            current_position = st.session_state.position_prefs.get(element, row['Position'])
+                            current_position = st.session_state.position_prefs.get(unique_key, row['Position'])
                             new_position = st.selectbox(
                                 f"Position",
                                 options=["Up", "Down"],
                                 index=0 if current_position == "Up" else 1,
-                                key=f"position_{element}"
+                                key=f"position_{unique_key}",
+                                label_visibility="collapsed"
                             )
-                            st.session_state.position_prefs[element] = new_position
+                            st.session_state.position_prefs[unique_key] = new_position
                         
                         with col4:
                             # Enable/disable checkbox
                             enabled = st.checkbox(
                                 "Show",
-                                value=st.session_state.enabled_elements.get(element, True),
-                                key=f"enabled_{element}"
+                                value=st.session_state.enabled_elements.get(unique_key, True),
+                                key=f"enabled_{unique_key}"
                             )
-                            st.session_state.enabled_elements[element] = enabled
+                            st.session_state.enabled_elements[unique_key] = enabled
                 
                 # Apply customizations to dataframe
                 df_display = df.copy()
-                for element in df_display['Element']:
-                    if element in st.session_state.color_prefs:
-                        df_display.loc[df_display['Element'] == element, 'Color'] = st.session_state.color_prefs[element]
-                    if element in st.session_state.position_prefs:
-                        df_display.loc[df_display['Element'] == element, 'Position'] = st.session_state.position_prefs[element]
+                for idx, row in df_display.iterrows():
+                    element = row['Element']
+                    unique_key = f"{idx}_{element}"
+                    
+                    if unique_key in st.session_state.color_prefs:
+                        df_display.loc[idx, 'Color'] = st.session_state.color_prefs[unique_key]
+                    if unique_key in st.session_state.position_prefs:
+                        df_display.loc[idx, 'Position'] = st.session_state.position_prefs[unique_key]
                 
                 # Filter out disabled elements
-                df_display = df_display[df_display['Element'].apply(lambda x: st.session_state.enabled_elements.get(x, True))]
+                enabled_indices = []
+                for idx, row in df_display.iterrows():
+                    element = row['Element']
+                    unique_key = f"{idx}_{element}"
+                    if st.session_state.enabled_elements.get(unique_key, True):
+                        enabled_indices.append(idx)
+                
+                df_display = df_display.loc[enabled_indices]
                 
                 # Show feature table
                 st.markdown("---")
