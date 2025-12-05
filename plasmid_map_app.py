@@ -863,6 +863,6 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
-    🧬 Plasmid Map Generator v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke
+    🧬 Plasmid Map Generator v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP 
 </div>
 """, unsafe_allow_html=True)
