@@ -1,100 +1,111 @@
+#!/usr/bin/env python3
+"""
+Plasmid Map Generator - Advanced Version with GenBank Support
+Supports .gb files, region selection, text orientation, position display, and more!
+"""
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.patches import Polygon
-import numpy as np
-from io import BytesIO
+from matplotlib.patches import FancyArrowPatch
+from matplotlib import colors as mcolors
+import io
 import base64
+import random
+from Bio import SeqIO
+from Bio.SeqFeature import SeqFeature
 
-# Try to import BioPython for GenBank parsing
-try:
-    from Bio import SeqIO
-    BIOPYTHON_AVAILABLE = True
-except ImportError:
-    BIOPYTHON_AVAILABLE = False
+# Page configuration
+st.set_page_config(
+    page_title="Plasmid Map Generator - Advanced",
+    page_icon="🧬",
+    layout="wide"
+)
 
-# Define pastel colors
+# R color mapping
+R_COLOR_MAP = {
+    'darkorchid4': 'darkorchid', 'darkorchid3': 'darkorchid',
+    'darkorchid2': 'darkorchid', 'darkorchid1': 'orchid',
+    'darkturquoise': 'darkturquoise', 'brown2': 'brown',
+    'brown1': 'brown', 'brown3': 'brown', 'brown4': 'brown',
+    'gold1': 'gold', 'gold2': 'gold', 'gold3': 'goldenrod',
+    'gold4': 'goldenrod', 'aquamarine1': 'aquamarine',
+    'aquamarine2': 'aquamarine', 'aquamarine3': 'mediumaquamarine',
+    'aquamarine4': 'mediumaquamarine',
+}
+
+# Pastel colors pool for random assignment
 PASTEL_COLORS = [
-    'lightblue', 'lightcoral', 'lightgreen', 'lightyellow', 
-    'lightpink', 'lightsalmon', 'lightcyan', 'lavender',
-    'peachpuff', 'palegreen', 'mistyrose', 'wheat',
-    'lightsteelblue', 'thistle', 'lightgoldenrodyellow',
-    'powderblue', 'pink'
+    'lightblue', 'lightcoral', 'lightgreen', 'lightpink', 
+    'lightsalmon', 'lightyellow', 'lavender', 'mistyrose',
+    'peachpuff', 'powderblue', 'paleturquoise', 'thistle',
+    'plum', 'wheat', 'lightcyan', 'honeydew', 'azure'
 ]
 
-# Extended color palette for dropdowns (organized by category)
 ALL_COLORS = [
     # Pastel colors
-    'lightblue', 'lightcoral', 'lightgreen', 'lightyellow', 
-    'lightpink', 'lightsalmon', 'lightcyan', 'lavender',
-    'peachpuff', 'palegreen', 'mistyrose', 'wheat',
-    'lightsteelblue', 'thistle',
+    'lightblue', 'lightcoral', 'lightgreen', 'lightpink', 
+    'lightsalmon', 'lightyellow', 'lavender', 'mistyrose',
+    'peachpuff', 'powderblue', 'paleturquoise', 'thistle',
+    'plum', 'wheat',
     # Bright colors
-    'red', 'blue', 'green', 'yellow', 'orange', 'purple',
-    'cyan', 'magenta', 'lime', 'pink',
+    'blue', 'green', 'red', 'purple', 'gold', 'orange', 
+    'yellow', 'cyan', 'magenta', 'lime', 'hotpink',
     # Standard colors
-    'brown', 'gray', 'olive', 'navy', 'teal', 'maroon',
-    'coral', 'gold', 'indigo', 'crimson', 'darkgreen',
-    'darkblue', 'darkred', 'darkorange', 'darkviolet',
-    'deepskyblue', 'forestgreen', 'hotpink', 'khaki',
-    'lightseagreen', 'mediumpurple', 'mediumseagreen',
-    'orangered', 'orchid', 'palevioletred', 'peru',
-    'plum', 'royalblue', 'salmon', 'sandybrown',
-    'seagreen', 'sienna', 'skyblue', 'slateblue',
-    'springgreen', 'steelblue', 'tan', 'tomato',
-    'turquoise', 'violet', 'yellowgreen'
+    'brown', 'dodgerblue', 'forestgreen', 'darkred', 
+    'darkorchid', 'darkturquoise', 'aquamarine', 'coral',
+    'teal', 'olive'
 ]
 
-def convert_r_color(color_name):
-    """Convert R color names to matplotlib equivalents"""
-    color_map = {
-        'lightyellow2': 'lightyellow',
-        'lightblue2': 'lightblue',
-        'lightpink2': 'lightpink'
-    }
-    return color_map.get(color_name, color_name)
+# Create a mapping of colors to display with color indicators
+def get_color_display_name(color):
+    """Add a colored square indicator before the color name"""
+    # Unicode colored square
+    return f"🟦 {color}" if color else color
 
-def parse_genbank_file(uploaded_file):
-    """
-    Parse a GenBank file and extract features for plasmid mapping
-    Returns a pandas DataFrame with columns: Element, Start, End, Color, Position, Strand, Note, IsPromoter
-    """
-    if not BIOPYTHON_AVAILABLE:
-        st.error("BioPython is not installed. Please install it with: pip install biopython")
-        return None
+def get_color_options_with_swatches():
+    """Create color options list with visual indicators"""
+    color_map = {}
+    for color in ALL_COLORS:
+        # Map display name back to actual color
+        color_map[get_color_display_name(color)] = color
+    return color_map
+
+def convert_r_color(color_name):
+    """Convert R color names to matplotlib-compatible colors"""
+    color_lower = color_name.lower().strip()
+    if color_lower in R_COLOR_MAP:
+        return R_COLOR_MAP[color_lower]
+    if mcolors.is_color_like(color_name):
+        return color_name
+    base_color = ''.join([c for c in color_lower if not c.isdigit()])
+    if mcolors.is_color_like(base_color):
+        return base_color
+    return 'black'
+
+def parse_genbank_file(file_content):
+    """Parse GenBank file and extract features"""
+    features_list = []
     
     try:
-        # Convert Streamlit's UploadedFile to text mode for BioPython
-        from io import StringIO
-        
-        # Read the file content and decode if necessary
-        file_content = uploaded_file.read()
-        if isinstance(file_content, bytes):
-            file_content = file_content.decode('utf-8')
-        
-        # Create a StringIO object for BioPython
-        text_file = StringIO(file_content)
-        
-        # Parse the GenBank file
-        record = SeqIO.read(text_file, "genbank")
-        plasmid_length = len(record.seq)
-        
-        elements_data = []
+        # Parse GenBank file
+        record = SeqIO.read(io.StringIO(file_content.decode('utf-8')), "genbank")
         
         for feature in record.features:
-            # Skip source features
+            # Skip 'source' features
             if feature.type.lower() == 'source':
                 continue
             
-            # Extract feature location
+            # Extract feature information
             start = int(feature.location.start) + 1  # Convert to 1-based
             end = int(feature.location.end)
+            feature_type = feature.type
             
-            # Get strand information (+1 = forward, -1 = reverse/complement)
+            # Detect strand (1 = forward, -1 = reverse/complement)
             strand = feature.location.strand if hasattr(feature.location, 'strand') else 1
             
-            # Extract feature name with priority order
+            # Extract standard_name or label
             name = None
             if 'standard_name' in feature.qualifiers:
                 name = feature.qualifiers['standard_name'][0]
@@ -105,764 +116,712 @@ def parse_genbank_file(uploaded_file):
             elif 'product' in feature.qualifiers:
                 name = feature.qualifiers['product'][0]
             else:
-                # Fallback to feature type and position
-                name = f"{feature.type}_{start}_{end}"
+                name = f"{feature_type}_{start}_{end}"
             
-            # Extract note qualifier
-            note = ""
-            if 'note' in feature.qualifiers:
-                note = " ".join(feature.qualifiers['note']).lower()
+            # Check if this is a promoter (regulatory + "promoter" in qualifiers)
+            is_promoter = False
+            if feature_type.lower() == 'regulatory':
+                # Check note, standard_name, or regulatory_class for "promoter"
+                for qual_key in ['note', 'standard_name', 'regulatory_class', 'label']:
+                    if qual_key in feature.qualifiers:
+                        qual_value = str(feature.qualifiers[qual_key]).lower()
+                        if 'promoter' in qual_value:
+                            is_promoter = True
+                            break
             
-            # Check if this is a promoter
-            is_promoter = (feature.type.lower() == 'regulatory' and 'promoter' in note)
+            # Default position: misc_feature = Down, others = Up
+            box_position = 'Down' if feature_type.lower() == 'misc_feature' else 'Up'
             
             # Assign random pastel color
-            color = np.random.choice(PASTEL_COLORS)
+            colour = random.choice(PASTEL_COLORS)
             
-            # Smart positioning based on strand direction:
-            # Forward strand (+1) = Up
-            # Reverse strand/complement (-1) = Down
-            # If strand info missing, use old logic (misc_feature = Down, others = Up)
-            if strand == -1:
-                position = "Down"
-            elif strand == 1:
-                position = "Up"
-            else:
-                # Fallback for features without strand info
-                position = "Down" if feature.type.lower() == 'misc_feature' else "Up"
+            # Default arrow type
+            arrow_type = 'arrow'
             
-            elements_data.append({
+            features_list.append({
                 'Element': name,
                 'Start': start,
                 'End': end,
-                'Color': color,
-                'Position': position,
+                'Box position': box_position,
+                'Colour': colour,
+                'Arrow end type': arrow_type,
+                'Feature type': feature_type,
                 'Strand': strand,
-                'Note': note,
-                'IsPromoter': is_promoter
+                'Is promoter': is_promoter
             })
         
-        df = pd.DataFrame(elements_data)
-        return df, plasmid_length
+        return pd.DataFrame(features_list)
     
     except Exception as e:
         st.error(f"Error parsing GenBank file: {str(e)}")
         return None
 
-def create_arrow_polygon(x_center, y_center, width, height, direction='right'):
-    """
-    Create an arrow-shaped polygon for promoters
-    direction: 'right' for forward strand, 'left' for reverse strand
-    """
-    if direction == 'right':
-        # Arrow pointing right
-        points = [
-            [x_center - width/2, y_center - height/2],  # Bottom left
-            [x_center + width/3, y_center - height/2],  # Bottom middle
-            [x_center + width/3, y_center - height/1.5], # Bottom arrow point
-            [x_center + width/2, y_center],              # Right tip
-            [x_center + width/3, y_center + height/1.5], # Top arrow point
-            [x_center + width/3, y_center + height/2],   # Top middle
-            [x_center - width/2, y_center + height/2],   # Top left
-        ]
-    else:  # left
-        # Arrow pointing left
-        points = [
-            [x_center + width/2, y_center - height/2],  # Bottom right
-            [x_center - width/3, y_center - height/2],  # Bottom middle
-            [x_center - width/3, y_center - height/1.5], # Bottom arrow point
-            [x_center - width/2, y_center],              # Left tip
-            [x_center - width/3, y_center + height/1.5], # Top arrow point
-            [x_center - width/3, y_center + height/2],   # Top middle
-            [x_center + width/2, y_center + height/2],   # Top right
-        ]
+def create_plasmid_map(data, font_size=11, show_positions=False, text_orientation='horizontal',
+                       region_start=None, region_end=None, visible_elements=None):
+    """Create plasmid map from DataFrame with advanced options"""
     
-    return Polygon(points, closed=True)
-
-def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False, 
-                       text_orientation='horizontal', region_start=None, region_end=None):
-    """Create plasmid map visualization with arrow-shaped promoters"""
+    # Clean column names
+    data.columns = data.columns.str.strip().str.lower().str.replace(' ', '_')
     
-    # Filter for region if specified
+    # Clean data
+    data['box_position'] = data['box_position'].str.strip().str.lower()
+    data['arrow_end_type'] = data['arrow_end_type'].str.strip().str.lower()
+    data['colour'] = data['colour'].str.strip()
+    
+    # Add default values for strand and is_promoter if not present
+    if 'strand' not in data.columns:
+        data['strand'] = 1
+    if 'is_promoter' not in data.columns:
+        data['is_promoter'] = False
+    
+    # Filter by visibility if specified
+    if visible_elements is not None:
+        data = data[data['element'].isin(visible_elements)].copy()
+    
+    if len(data) == 0:
+        st.warning("No elements to display!")
+        return None
+    
+    # Filter by region if specified
     if region_start is not None and region_end is not None:
-        df = df[
-            ((df['Start'] >= region_start) & (df['Start'] <= region_end)) |
-            ((df['End'] >= region_start) & (df['End'] <= region_end)) |
-            ((df['Start'] <= region_start) & (df['End'] >= region_end))
+        data = data[
+            ((data['start'] >= region_start) & (data['start'] <= region_end)) |
+            ((data['end'] >= region_start) & (data['end'] <= region_end)) |
+            ((data['start'] <= region_start) & (data['end'] >= region_end))
         ].copy()
         
-        if df.empty:
-            st.warning("No elements found in the specified region.")
+        if len(data) == 0:
+            st.warning("No elements in selected region!")
             return None
-    
-    # Determine plot range
-    if region_start is not None and region_end is not None:
-        plot_start = region_start
-        plot_end = region_end
+        
+        plasmid_start = region_start
+        plasmid_end = region_end
     else:
-        plot_start = 0
-        plot_end = plasmid_length
+        # Calculate plasmid extent
+        plasmid_start = min(data['start'].min(), data['end'].min()) - 50
+        plasmid_end = max(data['start'].max(), data['end'].max()) + 50
     
+    # Create figure
     fig, ax = plt.subplots(figsize=(14, 4))
     
-    # Draw the plasmid line
-    ax.plot([plot_start, plot_end], [0, 0], 'k-', linewidth=3)
+    # Set font
+    plt.rcParams['font.size'] = font_size
     
+    # Draw main plasmid line
+    ax.plot([plasmid_start, plasmid_end], [0, 0], 'k-', linewidth=3, zorder=1)
+    
+    # Parameters
     box_height = 80
     text_distance = 250
+    position_offset = 30  # Offset for position labels from boxes
+    arrow_point_width = 40  # Width of arrow point for promoters
     
-    for _, row in df.iterrows():
-        element = row['Element']
-        start = row['Start']
-        end = row['End']
-        color = convert_r_color(row['Color'])
-        position = row['Position']
-        is_promoter = row.get('IsPromoter', False)
-        strand = row.get('Strand', 1)
+    # Draw each element
+    for idx, row in data.iterrows():
+        # Handle point elements
+        element_start = row['start']
+        element_end = row['end']
+        if element_start == element_end:
+            min_width = 50
+            element_start = element_start - min_width / 2
+            element_end = element_end + min_width / 2
         
-        # Calculate center and width
-        center = (start + end) / 2
-        width = end - start
+        midpoint = (element_start + element_end) / 2
+        element_width = element_end - element_start
         
-        # Determine y position
-        if position == "Up":
+        # Calculate positions
+        if row['box_position'] == 'up':
             box_y = box_height / 2
             text_y = box_height + text_distance
-            position_y = box_height + 30
+            arrow_start_y = box_height
+            arrow_end_y = text_y - 20
+            position_y = box_y + box_height/2 + position_offset  # Above box
         else:
             box_y = -box_height / 2
             text_y = -box_height - text_distance
-            position_y = -box_height - 30
+            arrow_start_y = -box_height
+            arrow_end_y = text_y + 20
+            position_y = box_y - box_height/2 - position_offset  # Below box
         
-        # Draw arrow for promoters, rectangle for others
-        if is_promoter:
-            # Draw arrow shape
-            arrow_direction = 'right' if strand >= 0 else 'left'
-            arrow = create_arrow_polygon(center, box_y, width, box_height, arrow_direction)
-            arrow_patch = patches.Polygon(arrow.get_xy(), closed=True, 
-                                         edgecolor='black', facecolor=color, 
-                                         linewidth=1.5, zorder=3)
-            ax.add_patch(arrow_patch)
+        converted_color = convert_r_color(row['colour'])
+        
+        # Draw box or promoter arrow
+        if row['is_promoter']:
+            # Draw promoter as arrow-shaped box
+            strand = row['strand']
+            arrow_point = min(arrow_point_width, element_width * 0.3)  # Limit point size
+            
+            if strand == -1:  # Complement/reverse strand - arrow points LEFT
+                # Create left-pointing arrow polygon
+                vertices = [
+                    (element_start, box_y - box_height/2),      # Bottom-left (point)
+                    (element_start + arrow_point, box_y - box_height/2),  # Bottom after point
+                    (element_end, box_y - box_height/2),        # Bottom-right
+                    (element_end, box_y + box_height/2),        # Top-right
+                    (element_start + arrow_point, box_y + box_height/2),  # Top after point
+                    (element_start, box_y)                      # Top-left (point tip)
+                ]
+            else:  # Forward strand - arrow points RIGHT
+                # Create right-pointing arrow polygon
+                vertices = [
+                    (element_start, box_y - box_height/2),      # Bottom-left
+                    (element_end - arrow_point, box_y - box_height/2),  # Bottom before point
+                    (element_end, box_y),                       # Right point tip
+                    (element_end - arrow_point, box_y + box_height/2),  # Top before point
+                    (element_start, box_y + box_height/2)       # Top-left
+                ]
+            
+            # Draw the promoter arrow
+            promoter_arrow = patches.Polygon(
+                vertices,
+                closed=True,
+                linewidth=1.5,
+                edgecolor='black',
+                facecolor=converted_color,
+                zorder=2
+            )
+            ax.add_patch(promoter_arrow)
+            
         else:
-            # Draw rectangle
-            rect = patches.Rectangle((start, box_y - box_height/2), width, box_height,
-                                    linewidth=1.5, edgecolor='black', facecolor=color)
+            # Draw regular rectangular box
+            rect = patches.Rectangle(
+                (element_start, box_y - box_height/2),
+                element_end - element_start,
+                box_height,
+                linewidth=1.5,
+                edgecolor='black',
+                facecolor=converted_color,
+                zorder=2
+            )
             ax.add_patch(rect)
         
-        # Draw vertical line connecting box to label
-        ax.plot([center, center], [box_y, text_y], 'k-', linewidth=1.5)
-        
-        # Add element name with rotation if vertical
-        if text_orientation == 'vertical':
-            # For vertical text (rotated 90°), alignment works differently
-            # ha='left' means text extends upward after rotation (for Up position)
-            # ha='right' means text extends downward after rotation (for Down position)
-            if position == "Up":
-                ax.text(center, text_y, element, ha='left', va='center',
-                       fontsize=label_font, rotation=90, rotation_mode='anchor')
-            else:
-                ax.text(center, text_y, element, ha='right', va='center',
-                       fontsize=label_font, rotation=90, rotation_mode='anchor')
+        # Draw arrow to label
+        if row['arrow_end_type'] == 'arrow':
+            arrow = FancyArrowPatch(
+                (midpoint, arrow_start_y),
+                (midpoint, arrow_end_y),
+                arrowstyle='-|>',
+                mutation_scale=20,
+                linewidth=1.5,
+                color='black',
+                zorder=1
+            )
+            ax.add_patch(arrow)
         else:
-            ax.text(center, text_y, element, ha='center', va='bottom' if position == "Up" else 'top',
-                   fontsize=label_font)
+            ax.plot([midpoint, midpoint], [arrow_start_y, arrow_end_y],
+                   'k-', linewidth=1.5, zorder=1)
         
-        # Add position labels if requested
+        # Add element name label
+        if text_orientation == 'vertical':
+            ax.text(midpoint, text_y, row['element'],
+                   ha='center', va='center', fontsize=font_size, zorder=3,
+                   rotation=90, rotation_mode='anchor')
+        else:
+            ax.text(midpoint, text_y, row['element'],
+                   ha='center', va='center', fontsize=font_size, zorder=3)
+        
+        # Add size labels if enabled (CHANGED: show size instead of positions)
         if show_positions:
-            position_label = f"{start}-{end}"
-            position_font = max(label_font - 3, 6)
-            ax.text(center, position_y, position_label, ha='center', 
-                   va='bottom' if position == "Up" else 'top',
-                   fontsize=position_font, color='grey')
+            element_size = int(row['end'] - row['start'])
+            size_text = f"{element_size} bp"
+            position_fontsize = max(6, font_size - 3)  # Smaller font
+            ax.text(midpoint, position_y, size_text,
+                   ha='center', va='center', 
+                   fontsize=position_fontsize, 
+                   color='gray', 
+                   zorder=3)
     
     # Set axis properties
-    ax.set_xlim(plot_start - 500, plot_end + 500)
-    y_max = max(box_height + text_distance + 200, 800)
-    ax.set_ylim(-y_max, y_max)
+    y_margin = 400
+    ax.set_xlim(plasmid_start - 100, plasmid_end + 100)
+    ax.set_ylim(-y_margin, y_margin)
     ax.axis('off')
-    
     plt.tight_layout()
+    
     return fig
 
-def fig_to_bytes(fig, format='png', dpi=500):
-    """Convert matplotlib figure to bytes with specified DPI"""
-    buf = BytesIO()
-    fig.savefig(buf, format=format, dpi=dpi, bbox_inches='tight')
+def fig_to_download_link(fig, filename, format='pdf'):
+    """Convert matplotlib figure to download link"""
+    buf = io.BytesIO()
+    fig.savefig(buf, format=format, bbox_inches='tight', dpi=300)
     buf.seek(0)
-    return buf
-
-def get_download_link(buf, filename, file_label):
-    """Generate a download link for a file"""
     b64 = base64.b64encode(buf.read()).decode()
-    href = f'<a href="data:file/txt;base64,{b64}" download="{filename}">{file_label}</a>'
+    
+    mime_types = {'pdf': 'application/pdf', 'svg': 'image/svg+xml', 'png': 'image/png'}
+    mime = mime_types.get(format, 'application/octet-stream')
+    
+    href = f'<a href="data:{mime};base64,{b64}" download="{filename}.{format}">Download {format.upper()}</a>'
     return href
 
-# Streamlit app
-st.set_page_config(page_title="Plasmid Map Generator", layout="wide")
-st.title("🧬 Plasmid Map Generator")
-st.markdown("Generate professional plasmid maps from GenBank files, CSV/Excel, or manual entry")
+# Main app
+st.title("🧬 Plasmid Map Generator - Advanced")
+st.markdown("Create beautiful plasmid maps from GenBank files, CSV, Excel, or manual entry!")
 
-# Sidebar controls
-st.sidebar.header("⚙️ Map Settings")
-label_font = st.sidebar.slider("Label Font Size", 8, 20, 11)
-text_orientation = st.sidebar.radio("Element Name Orientation", 
-                                    options=['horizontal', 'vertical'],
-                                    index=0)
-show_positions = st.sidebar.checkbox("Show Position Labels", value=False)
+# Sidebar for settings
+with st.sidebar:
+    st.header("⚙️ Display Settings")
+    
+    font_size = st.slider("Label Font Size", min_value=8, max_value=20, value=11, step=1)
+    
+    text_orientation = st.radio(
+        "Element Name Orientation",
+        options=['horizontal', 'vertical'],
+        index=0
+    )
+    
+    show_positions = st.checkbox("Show Element Sizes", value=False, 
+                                 help="Display the size (in bp) of each element")
+    
+    st.markdown("---")
+    st.header("🎨 Color Palette")
+    
+    st.markdown("**✨ Pastel Colors:**")
+    st.markdown("lightblue, lightcoral, lightgreen, lightpink, lightsalmon, lightyellow, lavender, mistyrose, peachpuff, powderblue, paleturquoise, thistle, plum, wheat")
+    
+    st.markdown("**🌈 Bright Colors:**")
+    st.markdown("red, blue, green, yellow, orange, purple, cyan, magenta, lime, hotpink")
+    
+    st.markdown("**🎯 Standard Colors:**")
+    st.markdown("forestgreen, dodgerblue, brown, gold, coral, darkorchid, darkturquoise, teal, olive")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎨 Color Palette Reference")
-st.sidebar.markdown("""
-**Pastel Colors:** lightblue, lightcoral, lightgreen, lightyellow, lightpink, lightsalmon, lightcyan, lavender, peachpuff, palegreen, mistyrose, wheat, lightsteelblue, thistle
+# Main content tabs
+tab1, tab2, tab3, tab4 = st.tabs(["📁 GenBank File", "📊 CSV/Excel", "✏️ Manual Entry", "ℹ️ Help"])
 
-**Bright Colors:** red, blue, green, yellow, orange, purple, cyan, magenta, lime, pink
-
-**Standard Colors:** brown, gray, olive, navy, teal, maroon, coral, gold, indigo, and more
-""")
-
-# Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📄 GenBank File", "📊 CSV/Excel Upload", "✍️ Manual Entry", "❓ Help"])
-
-# TAB 1: GenBank File Upload
 with tab1:
-    st.header("Upload GenBank File")
-    st.markdown("""
-    Upload a GenBank (.gb, .gbk, .genbank) file to automatically extract features and generate a plasmid map.
+    st.header("Upload GenBank (.gb) File")
     
-    **Features:**
-    - ✅ Automatic feature parsing
-    - ✅ Arrow-shaped promoter boxes (pointing based on strand direction)
-    - ✅ Individual color customization
-    - ✅ Show/hide specific elements
-    - ✅ Region selection
-    - ✅ Smart positioning (misc_feature → Down, others → Up)
-    - ✅ High resolution output (500 DPI)
-    """)
+    gb_file = st.file_uploader(
+        "Choose a GenBank file",
+        type=['gb', 'gbk', 'genbank'],
+        help="Upload a GenBank format file"
+    )
     
-    if not BIOPYTHON_AVAILABLE:
-        st.error("""
-        ⚠️ **BioPython not installed**
-        
-        To use GenBank file parsing, install BioPython:
-        ```
-        pip install biopython
-        ```
-        """)
-    else:
-        uploaded_gb = st.file_uploader("Choose a GenBank file", type=['gb', 'gbk', 'genbank'], key='gb_uploader')
-        
-        if uploaded_gb is not None:
+    if gb_file is not None:
+        try:
             # Parse GenBank file
-            result = parse_genbank_file(uploaded_gb)
+            file_content = gb_file.read()
+            df = parse_genbank_file(file_content)
             
-            if result is not None:
-                df, plasmid_length = result
-                st.success(f"✅ Successfully parsed {len(df)} features from {uploaded_gb.name} ({plasmid_length} bp)")
+            if df is not None and len(df) > 0:
+                st.success(f"✅ Loaded {len(df)} features from GenBank file!")
                 
                 # Store in session state
-                st.session_state.gb_data = df
-                st.session_state.plasmid_length = plasmid_length
-                
-                # Initialize color and position preferences if not exists
-                if 'color_prefs' not in st.session_state:
-                    st.session_state.color_prefs = {}
-                if 'position_prefs' not in st.session_state:
-                    st.session_state.position_prefs = {}
-                if 'enabled_elements' not in st.session_state:
-                    st.session_state.enabled_elements = {}
-                if 'edited_labels' not in st.session_state:
-                    st.session_state.edited_labels = {}
-                
-                # Initialize enabled state for all elements using unique keys
-                for idx, row in df.iterrows():
-                    element = row['Element']
-                    unique_key = f"{idx}_{element}"
-                    if unique_key not in st.session_state.enabled_elements:
-                        st.session_state.enabled_elements[unique_key] = True
-                    # Initialize edited labels with original element name
-                    if unique_key not in st.session_state.edited_labels:
-                        st.session_state.edited_labels[unique_key] = element
+                if 'gb_data' not in st.session_state or not df.equals(st.session_state.get('gb_data', pd.DataFrame())):
+                    st.session_state.gb_data = df.copy()
+                    # Initialize color preferences
+                    st.session_state.color_prefs = {row['Element']: row['Colour'] for _, row in df.iterrows()}
+                    st.session_state.position_prefs = {row['Element']: row['Box position'] for _, row in df.iterrows()}
+                    # Initialize visibility preferences (all visible by default)
+                    st.session_state.visibility_prefs = {row['Element']: True for _, row in df.iterrows()}
                 
                 # Region selection
-                st.markdown("---")
-                st.subheader("🎯 Region Selection (Optional)")
-                show_region = st.checkbox("Show only specific region", value=False, key='show_region_gb')
+                st.subheader("📍 Region Selection")
                 
-                region_start = None
-                region_end = None
+                min_pos = int(df['Start'].min())
+                max_pos = int(df['End'].max())
                 
-                if show_region:
+                use_region = st.checkbox("Show only specific region", value=False)
+                
+                if use_region:
                     col1, col2 = st.columns(2)
                     with col1:
                         region_start = st.number_input("Region Start (bp)", 
-                                                      min_value=1, 
-                                                      max_value=plasmid_length,
-                                                      value=1,
-                                                      key='region_start_gb')
+                                                      min_value=min_pos, 
+                                                      max_value=max_pos, 
+                                                      value=min_pos)
                     with col2:
                         region_end = st.number_input("Region End (bp)", 
-                                                    min_value=1, 
-                                                    max_value=plasmid_length,
-                                                    value=min(1000, plasmid_length),
-                                                    key='region_end_gb')
+                                                    min_value=min_pos, 
+                                                    max_value=max_pos, 
+                                                    value=max_pos)
+                else:
+                    region_start = None
+                    region_end = None
                 
-                # Customization section
-                st.markdown("---")
+                # Element customization
                 st.subheader("🎨 Customize Elements")
                 
-                with st.expander("Customize individual element colors, positions, and visibility"):
-                    # Initialize edited labels dict if not exists
-                    if 'edited_labels' not in st.session_state:
-                        st.session_state.edited_labels = {}
-                    
-                    # Add column headers
-                    header_cols = st.columns([3, 2, 2, 2, 1])
-                    with header_cols[0]:
-                        st.markdown("**Original Name**")
-                    with header_cols[1]:
-                        st.markdown("**Display Label**")
-                    with header_cols[2]:
-                        st.markdown("**Color**")
-                    with header_cols[3]:
-                        st.markdown("**Position**")
-                    with header_cols[4]:
-                        st.markdown("**Show**")
-                    
-                    st.markdown("---")
+                with st.expander("Change Colors, Positions, and Visibility", expanded=False):
+                    st.markdown("*Adjust colors, positions, and visibility for individual elements*")
+                    st.markdown("*Uncheck to hide an element from the map*")
                     
                     for idx, row in df.iterrows():
-                        element = row['Element']
-                        is_promoter = row.get('IsPromoter', False)
-                        strand = row.get('Strand', 1)
+                        element_name = row['Element']
+                        is_promoter = row.get('Is promoter', False)
+                        element_size = int(row['End'] - row['Start'])
                         
-                        # Create unique key using both index and element name to avoid duplicates
-                        unique_key = f"{idx}_{element}"
+                        # Add indicator if it's a promoter
+                        display_name = f"**{element_name}** ({element_size} bp)"
+                        if is_promoter:
+                            display_name = f"**{element_name}** ({element_size} bp) 🔷"
                         
-                        # Create columns for each element's controls
-                        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+                        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
                         
                         with col1:
-                            # Show element name with promoter indicator and strand info
-                            if is_promoter:
-                                arrow_symbol = "→" if strand >= 0 else "←"
-                                strand_info = "forward" if strand >= 0 else "reverse"
-                                st.markdown(f"**{element}** {arrow_symbol} (Promoter, {strand_info})")
-                            else:
-                                strand_info = "forward" if strand >= 0 else "reverse"
-                                st.markdown(f"**{element}** ({strand_info})")
+                            st.markdown(display_name)
                         
                         with col2:
-                            # Editable label
-                            current_label = st.session_state.edited_labels.get(unique_key, element)
-                            new_label = st.text_input(
-                                "Label",
-                                value=current_label,
-                                key=f"label_{unique_key}",
-                                label_visibility="collapsed",
-                                placeholder="Edit label..."
-                            )
-                            st.session_state.edited_labels[unique_key] = new_label
-                        
-                        with col3:
-                            # Color selector with preview
-                            current_color = st.session_state.color_prefs.get(unique_key, row['Color'])
+                            # Get current color preference
+                            current_color = st.session_state.color_prefs.get(element_name, row['Colour'])
                             
-                            # Create color options with color swatches
-                            color_options = []
-                            for color in ALL_COLORS:
-                                # Create a colored square emoji representation
-                                color_options.append(color)
-                            
+                            # Create color selector with visual swatches
                             new_color = st.selectbox(
                                 f"Color",
                                 options=ALL_COLORS,
-                                index=ALL_COLORS.index(current_color) if current_color in ALL_COLORS else 0,
-                                key=f"color_{unique_key}",
-                                label_visibility="collapsed",
-                                format_func=lambda x: f"⬛ {x}"
-                            )
-                            st.session_state.color_prefs[unique_key] = new_color
-                            
-                            # Show color preview below dropdown
-                            st.markdown(f'<div style="background-color: {new_color}; width: 100%; height: 20px; border: 1px solid black; border-radius: 3px;"></div>', unsafe_allow_html=True)
-                        
-                        with col4:
-                            # Position selector
-                            current_position = st.session_state.position_prefs.get(unique_key, row['Position'])
-                            new_position = st.selectbox(
-                                f"Position",
-                                options=["Up", "Down"],
-                                index=0 if current_position == "Up" else 1,
-                                key=f"position_{unique_key}",
+                                index=ALL_COLORS.index(current_color),
+                                key=f"color_{idx}",
                                 label_visibility="collapsed"
                             )
-                            st.session_state.position_prefs[unique_key] = new_position
-                        
-                        with col5:
-                            # Enable/disable checkbox
-                            enabled = st.checkbox(
-                                "Show",
-                                value=st.session_state.enabled_elements.get(unique_key, True),
-                                key=f"enabled_{unique_key}"
+                            st.session_state.color_prefs[element_name] = new_color
+                            
+                            # Show color swatch below the dropdown
+                            st.markdown(
+                                f'<div style="width: 100%; height: 20px; background-color: {new_color}; '
+                                f'border: 1px solid #ccc; border-radius: 3px; margin-top: 5px;"></div>',
+                                unsafe_allow_html=True
                             )
-                            st.session_state.enabled_elements[unique_key] = enabled
+                        
+                        with col3:
+                            new_position = st.selectbox(
+                                f"Position",
+                                options=['Up', 'Down'],
+                                index=0 if st.session_state.position_prefs.get(element_name, row['Box position']) == 'Up' else 1,
+                                key=f"pos_{idx}",
+                                label_visibility="collapsed"
+                            )
+                            st.session_state.position_prefs[element_name] = new_position
+                        
+                        with col4:
+                            is_visible = st.checkbox(
+                                "Show",
+                                value=st.session_state.visibility_prefs.get(element_name, True),
+                                key=f"vis_{idx}"
+                            )
+                            st.session_state.visibility_prefs[element_name] = is_visible
                 
-                # Apply customizations to dataframe
-                df_display = df.copy()
-                for idx, row in df_display.iterrows():
-                    element = row['Element']
-                    unique_key = f"{idx}_{element}"
-                    
-                    # Apply edited labels
-                    if unique_key in st.session_state.edited_labels:
-                        df_display.loc[idx, 'Element'] = st.session_state.edited_labels[unique_key]
-                    
-                    # Apply color preferences
-                    if unique_key in st.session_state.color_prefs:
-                        df_display.loc[idx, 'Color'] = st.session_state.color_prefs[unique_key]
-                    
-                    # Apply position preferences
-                    if unique_key in st.session_state.position_prefs:
-                        df_display.loc[idx, 'Position'] = st.session_state.position_prefs[unique_key]
+                # Apply customizations
+                display_df = df.copy()
+                for idx, row in display_df.iterrows():
+                    element_name = row['Element']
+                    if element_name in st.session_state.color_prefs:
+                        display_df.at[idx, 'Colour'] = st.session_state.color_prefs[element_name]
+                    if element_name in st.session_state.position_prefs:
+                        display_df.at[idx, 'Box position'] = st.session_state.position_prefs[element_name]
                 
-                # Filter out disabled elements
-                enabled_indices = []
-                for idx, row in df_display.iterrows():
-                    element = row['Element']
-                    unique_key = f"{idx}_{element}"
-                    if st.session_state.enabled_elements.get(unique_key, True):
-                        enabled_indices.append(idx)
+                # Get visible elements
+                visible_elements = [name for name, vis in st.session_state.visibility_prefs.items() if vis]
                 
-                df_display = df_display.loc[enabled_indices]
-                
-                # Show feature table
-                st.markdown("---")
-                st.subheader("📋 Feature Table")
-                
-                # Create display dataframe with edited labels
-                display_df = df_display[['Element', 'Start', 'End', 'Color', 'Position', 'IsPromoter']].copy()
-                display_df['IsPromoter'] = display_df['IsPromoter'].apply(lambda x: '✓' if x else '')
-                display_df.columns = ['Element Name', 'Start (bp)', 'End (bp)', 'Color', 'Box Position', 'Promoter']
-                st.dataframe(display_df, use_container_width=True)
+                # Show data table (only visible elements)
+                st.subheader("Feature Table")
+                visible_df = display_df[display_df['Element'].isin(visible_elements)].copy()
+                if len(visible_df) > 0:
+                    # Add size column for display
+                    visible_df['Size (bp)'] = visible_df['End'] - visible_df['Start']
+                    st.dataframe(visible_df[['Element', 'Start', 'End', 'Size (bp)', 'Feature type', 'Box position', 'Colour']], 
+                               use_container_width=True)
+                    st.info(f"Showing {len(visible_df)} of {len(df)} elements")
+                else:
+                    st.warning("No elements selected to display!")
                 
                 # Generate button
-                st.markdown("---")
-                if st.button("🎨 Generate Plasmid Map", type="primary", key='generate_gb'):
-                    if len(df_display) == 0:
-                        st.warning("⚠️ No elements selected! Please enable at least one element.")
-                    else:
-                        with st.spinner("Generating plasmid map..."):
-                            fig = create_plasmid_map(df_display, plasmid_length, label_font, 
-                                                   show_positions, text_orientation,
-                                                   region_start, region_end)
+                if st.button("🎨 Generate Plasmid Map", type="primary", key="gb_generate"):
+                    with st.spinner("Creating your plasmid map..."):
+                        try:
+                            fig = create_plasmid_map(
+                                display_df, 
+                                font_size=font_size,
+                                show_positions=show_positions,
+                                text_orientation=text_orientation,
+                                region_start=region_start,
+                                region_end=region_end,
+                                visible_elements=visible_elements
+                            )
                             
-                            if fig:
+                            if fig is not None:
                                 st.pyplot(fig)
                                 
-                                # Download options
-                                st.markdown("### 💾 Download Options")
+                                # Download buttons
+                                st.subheader("📥 Download Your Map")
                                 col1, col2, col3 = st.columns(3)
                                 
                                 with col1:
-                                    pdf_buf = fig_to_bytes(fig, 'pdf', dpi=500)
-                                    st.download_button(
-                                        label="📄 Download PDF",
-                                        data=pdf_buf,
-                                        file_name="plasmid_map.pdf",
-                                        mime="application/pdf"
-                                    )
-                                
+                                    st.markdown(fig_to_download_link(fig, "plasmid_map", "pdf"), 
+                                              unsafe_allow_html=True)
                                 with col2:
-                                    svg_buf = fig_to_bytes(fig, 'svg', dpi=500)
-                                    st.download_button(
-                                        label="🎨 Download SVG",
-                                        data=svg_buf,
-                                        file_name="plasmid_map.svg",
-                                        mime="image/svg+xml"
-                                    )
-                                
+                                    st.markdown(fig_to_download_link(fig, "plasmid_map", "svg"), 
+                                              unsafe_allow_html=True)
                                 with col3:
-                                    png_buf = fig_to_bytes(fig, 'png', dpi=500)
-                                    st.download_button(
-                                        label="🖼️ Download PNG (500 DPI)",
-                                        data=png_buf,
-                                        file_name="plasmid_map.png",
-                                        mime="image/png"
-                                    )
+                                    st.markdown(fig_to_download_link(fig, "plasmid_map", "png"), 
+                                              unsafe_allow_html=True)
                                 
                                 plt.close(fig)
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+        
+        except Exception as e:
+            st.error(f"❌ Error reading file: {str(e)}")
+    
+    else:
+        st.info("👆 Upload a GenBank file to get started")
 
-# TAB 2: CSV/Excel Upload
 with tab2:
     st.header("Upload CSV or Excel File")
-    st.markdown("""
-    Upload a CSV or Excel file with plasmid element information.
     
-    **Required columns:**
-    - `Element`: Name of the genetic element
-    - `Start`: Start position (bp)
-    - `End`: End position (bp)
-    - `Color`: Color name (e.g., 'lightblue', 'red')
-    - `Position`: 'Up' or 'Down'
-    """)
-    
-    uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key='csv_uploader')
+    uploaded_file = st.file_uploader(
+        "Choose a file",
+        type=['csv', 'xlsx', 'xls'],
+        help="Upload a CSV or Excel file with your plasmid data"
+    )
     
     if uploaded_file is not None:
         try:
+            # Read file
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
             else:
                 df = pd.read_excel(uploaded_file)
             
-            # Validate columns
-            required_cols = ['Element', 'Start', 'End', 'Color', 'Position']
-            if not all(col in df.columns for col in required_cols):
-                st.error(f"Missing required columns. Need: {', '.join(required_cols)}")
-            else:
-                # Get plasmid length from data
-                plasmid_length = st.number_input("Plasmid Length (bp)", 
-                                                min_value=int(df['End'].max()), 
-                                                value=int(df['End'].max()) + 500)
-                
-                # Add IsPromoter column (default False for uploaded data)
-                df['IsPromoter'] = False
-                
-                st.subheader("📋 Data Preview")
-                st.dataframe(df)
-                
-                if st.button("🎨 Generate Plasmid Map", type="primary", key='generate_csv'):
-                    with st.spinner("Generating plasmid map..."):
-                        fig = create_plasmid_map(df, plasmid_length, label_font, 
-                                               show_positions, text_orientation)
+            st.success("✅ File uploaded successfully!")
+            
+            # Show data
+            st.subheader("Your Data")
+            st.dataframe(df, use_container_width=True)
+            
+            # Generate button
+            if st.button("🎨 Generate Plasmid Map", type="primary", key="upload_generate"):
+                with st.spinner("Creating your plasmid map..."):
+                    try:
+                        fig = create_plasmid_map(
+                            df, 
+                            font_size=font_size,
+                            show_positions=show_positions,
+                            text_orientation=text_orientation
+                        )
                         
-                        if fig:
+                        if fig is not None:
                             st.pyplot(fig)
                             
-                            # Download options
-                            st.markdown("### 💾 Download Options")
+                            # Download buttons
+                            st.subheader("📥 Download Your Map")
                             col1, col2, col3 = st.columns(3)
                             
                             with col1:
-                                pdf_buf = fig_to_bytes(fig, 'pdf', dpi=500)
-                                st.download_button(
-                                    label="📄 Download PDF",
-                                    data=pdf_buf,
-                                    file_name="plasmid_map.pdf",
-                                    mime="application/pdf"
-                                )
-                            
+                                st.markdown(fig_to_download_link(fig, "plasmid_map", "pdf"), 
+                                          unsafe_allow_html=True)
                             with col2:
-                                svg_buf = fig_to_bytes(fig, 'svg', dpi=500)
-                                st.download_button(
-                                    label="🎨 Download SVG",
-                                    data=svg_buf,
-                                    file_name="plasmid_map.svg",
-                                    mime="image/svg+xml"
-                                )
-                            
+                                st.markdown(fig_to_download_link(fig, "plasmid_map", "svg"), 
+                                          unsafe_allow_html=True)
                             with col3:
-                                png_buf = fig_to_bytes(fig, 'png', dpi=500)
-                                st.download_button(
-                                    label="🖼️ Download PNG (500 DPI)",
-                                    data=png_buf,
-                                    file_name="plasmid_map.png",
-                                    mime="image/png"
-                                )
+                                st.markdown(fig_to_download_link(fig, "plasmid_map", "png"), 
+                                          unsafe_allow_html=True)
                             
                             plt.close(fig)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        st.info("Please check your data format matches the required columns.")
         
         except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
-
-# TAB 3: Manual Entry
-with tab3:
-    st.header("Manual Entry")
-    st.markdown("Enter plasmid elements one at a time")
+            st.error(f"❌ Error reading file: {str(e)}")
     
-    # Initialize manual data in session state
+    else:
+        st.info("👆 Upload a file to get started")
+        
+        # Show example
+        st.subheader("📋 Example Data Format")
+        example_df = pd.DataFrame({
+            'Element': ['Promoter', 'GeneX', 'Resistance'],
+            'Start': [100, 400, 1300],
+            'End': [300, 1200, 2100],
+            'Box position': ['Up', 'Down', 'Up'],
+            'Colour': ['dodgerblue', 'forestgreen', 'brown'],
+            'Arrow end type': ['arrow', 'arrow', 'flat']
+        })
+        st.dataframe(example_df, use_container_width=True)
+
+with tab3:
+    st.header("Manual Data Entry")
+    st.markdown("Enter your plasmid elements one by one")
+    
+    # Initialize session state for manual entries
     if 'manual_data' not in st.session_state:
         st.session_state.manual_data = []
     
     # Input form
-    with st.form("manual_entry_form"):
+    with st.form("element_form"):
         col1, col2 = st.columns(2)
         
         with col1:
-            element = st.text_input("Element Name")
-            start = st.number_input("Start Position (bp)", min_value=1, value=1)
-            end = st.number_input("End Position (bp)", min_value=1, value=100)
+            element = st.text_input("Element Name", value="Gene1")
+            start = st.number_input("Start Position (bp)", min_value=0, value=100, step=10)
+            end = st.number_input("End Position (bp)", min_value=0, value=500, step=10)
         
         with col2:
-            color = st.selectbox("Color", ALL_COLORS)
-            position = st.selectbox("Position", ["Up", "Down"])
+            box_pos = st.selectbox("Box Position", ["Up", "Down"])
+            
+            # Color selection with swatch display
+            colour = st.selectbox("Colour", ALL_COLORS)
+            # Show selected color swatch
+            st.markdown(
+                f'<div style="width: 100%; height: 30px; background-color: {colour}; '
+                f'border: 1px solid #ccc; border-radius: 3px; margin-top: 5px;"></div>',
+                unsafe_allow_html=True
+            )
+            
+            arrow_type = st.selectbox("Arrow Type", ["arrow", "flat"])
         
-        submitted = st.form_submit_button("➕ Add Element")
-        
-        if submitted and element:
-            st.session_state.manual_data.append({
-                'Element': element,
-                'Start': start,
-                'End': end,
-                'Color': color,
-                'Position': position,
-                'IsPromoter': False
-            })
-            st.success(f"Added: {element}")
+        col_add, col_clear = st.columns([1, 1])
+        with col_add:
+            add_button = st.form_submit_button("➕ Add Element", type="primary")
+        with col_clear:
+            clear_button = st.form_submit_button("🗑️ Clear All")
     
-    # Display current entries
+    if add_button:
+        st.session_state.manual_data.append({
+            'Element': element,
+            'Start': start,
+            'End': end,
+            'Box position': box_pos,
+            'Colour': colour,
+            'Arrow end type': arrow_type
+        })
+        st.success(f"✅ Added {element}")
+    
+    if clear_button:
+        st.session_state.manual_data = []
+        st.info("🗑️ Cleared all elements")
+    
+    # Show current data
     if st.session_state.manual_data:
-        st.subheader("📋 Current Elements")
-        df_manual = pd.DataFrame(st.session_state.manual_data)
-        st.dataframe(df_manual)
-        
-        # Clear button
-        if st.button("🗑️ Clear All Elements"):
-            st.session_state.manual_data = []
-            st.rerun()
-        
-        # Plasmid length
-        plasmid_length = st.number_input("Plasmid Length (bp)", 
-                                        min_value=int(df_manual['End'].max()), 
-                                        value=int(df_manual['End'].max()) + 500,
-                                        key='manual_length')
+        st.subheader("Current Elements")
+        manual_df = pd.DataFrame(st.session_state.manual_data)
+        # Add size column
+        manual_df['Size (bp)'] = manual_df['End'] - manual_df['Start']
+        st.dataframe(manual_df, use_container_width=True)
         
         # Generate button
-        if st.button("🎨 Generate Plasmid Map", type="primary", key='generate_manual'):
-            with st.spinner("Generating plasmid map..."):
-                fig = create_plasmid_map(df_manual, plasmid_length, label_font,
-                                       show_positions, text_orientation)
-                
-                if fig:
-                    st.pyplot(fig)
+        if st.button("🎨 Generate Plasmid Map", type="primary", key="manual_generate"):
+            with st.spinner("Creating your plasmid map..."):
+                try:
+                    fig = create_plasmid_map(
+                        manual_df, 
+                        font_size=font_size,
+                        show_positions=show_positions,
+                        text_orientation=text_orientation
+                    )
                     
-                    # Download options
-                    st.markdown("### 💾 Download Options")
-                    col1, col2, col3 = st.columns(3)
+                    if fig is not None:
+                        st.pyplot(fig)
+                        
+                        # Download buttons
+                        st.subheader("📥 Download Your Map")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.markdown(fig_to_download_link(fig, "plasmid_map", "pdf"), 
+                                      unsafe_allow_html=True)
+                        with col2:
+                            st.markdown(fig_to_download_link(fig, "plasmid_map", "svg"), 
+                                      unsafe_allow_html=True)
+                        with col3:
+                            st.markdown(fig_to_download_link(fig, "plasmid_map", "png"), 
+                                      unsafe_allow_html=True)
+                        
+                        plt.close(fig)
                     
-                    with col1:
-                        pdf_buf = fig_to_bytes(fig, 'pdf', dpi=500)
-                        st.download_button(
-                            label="📄 Download PDF",
-                            data=pdf_buf,
-                            file_name="plasmid_map.pdf",
-                            mime="application/pdf"
-                        )
-                    
-                    with col2:
-                        svg_buf = fig_to_bytes(fig, 'svg', dpi=500)
-                        st.download_button(
-                            label="🎨 Download SVG",
-                            data=svg_buf,
-                            file_name="plasmid_map.svg",
-                                mime="image/svg+xml"
-                        )
-                    
-                    with col3:
-                        png_buf = fig_to_bytes(fig, 'png', dpi=500)
-                        st.download_button(
-                            label="🖼️ Download PNG (500 DPI)",
-                            data=png_buf,
-                            file_name="plasmid_map.png",
-                            mime="image/png"
-                        )
-                    
-                    plt.close(fig)
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+    else:
+        st.info("👆 Add elements using the form above")
 
-# TAB 4: Help
 with tab4:
-    st.header("📚 Help & Documentation")
+    st.header("📖 How to Use")
     
     st.markdown("""
-    ## GenBank File Input
+    ### 🆕 GenBank File Support
     
-    ### File Format
-    Upload GenBank format files (.gb, .gbk, .genbank) exported from SnapGene, Benchling, or other tools.
+    Upload a `.gb` file and the app will automatically:
+    - Parse all features (except 'source')
+    - Extract feature names from `/standard_name=`
+    - Assign random pastel colors (customizable!)
+    - Set `misc_feature` to "Down" by default
+    - **Detect promoters** and draw as arrow-shaped boxes 🔷
+    - **Detect strand orientation** (forward/complement)
+    - Allow you to customize colors, positions, and visibility
     
-    ### Automatic Parsing
-    - Extracts all features except 'source'
-    - Feature names from: `/standard_name=` → `/label=` → `/gene=` → `/product=`
-    - **Promoters:** Regulatory features with "promoter" in `/note=` get arrow shapes
-      - Forward strand (no complement) → Arrow points RIGHT →
-      - Reverse strand (complement) → Arrow points LEFT ←
-    - Random pastel colors assigned
-    - Smart positioning: `misc_feature` → Down, others → Up
+    ### 🔷 Promoter Arrows (NEW!)
     
-    ### Element Control
-    Each element can be:
-    - **Shown/Hidden:** Check/uncheck "Show" box
-    - **Recolored:** Choose from 40+ colors
-    - **Repositioned:** Switch between Up/Down
+    **Automatic Detection:**
+    - Features marked as `regulatory` with "promoter" in notes
+    - Drawn as arrow-shaped boxes instead of rectangles
     
-    ### Region Selection
-    Focus on specific plasmid regions (useful for large plasmids):
-    1. Check "Show only specific region"
-    2. Enter start and end positions
-    3. Generate map showing only that region
+    **Arrow Direction:**
+    - **Forward strand** → Arrow points RIGHT
+    - **Complement/reverse** → Arrow points LEFT
+    - Direction matches GenBank strand annotation
     
-    ### Advanced Features
-    - **Position Labels:** Show bp coordinates (start-end)
-    - **Text Orientation:** Horizontal (default) or vertical
-    - **High Resolution:** 500 DPI output for publications
+    ### 🎯 Advanced Features
     
-    ## CSV/Excel Input
+    **Element Visibility:**
+    - Show/hide individual elements
+    - Checkbox for each element in customization panel
+    - Remove unwanted features from map
     
-    ### Required Columns
-    - `Element`: Feature name
-    - `Start`: Start position (1-based)
-    - `End`: End position
-    - `Color`: Color name (e.g., 'lightblue', 'red')
-    - `Position`: 'Up' or 'Down'
+    **Color Swatches:**
+    - Visual color preview below each dropdown
+    - See your color choice immediately
+    - Easy to match colors across elements
     
-    ## Manual Entry
+    **Region Selection:**
+    - View entire plasmid OR specific region
+    - Enter start and end positions
     
-    Add elements one at a time:
-    1. Enter element details
-    2. Click "Add Element"
-    3. Repeat for all elements
-    4. Generate map
+    **Text Orientation:**
+    - Horizontal (default) or Vertical element names
     
-    ## Tips
+    **Size Labels:**
+    - Toggle to show/hide element sizes
+    - Displayed in smaller grey font as "XXX bp"
+    - Shows length of each element
     
-    - **Large plasmids:** Use region selection + vertical text
-    - **Publications:** Enable position labels, use SVG format
-    - **Teaching:** Show position labels for reference
-    - **Promoters:** Automatically get directional arrows from GenBank
-    - **Quick maps:** GenBank → Upload → Generate (30 seconds!)
+    **Individual Element Control:**
+    - Change color for each element separately
+    - Change Up/Down position for each element
+    - See element sizes in the customization panel
     
-    ## Color Reference
+    ### 📁 Input Options
     
-    **Pastel:** lightblue, lightcoral, lightgreen, lightyellow, lightpink, lightsalmon, lightcyan, lavender, peachpuff, palegreen, mistyrose, wheat, lightsteelblue, thistle
+    1. **GenBank File** - Upload .gb file (automatic parsing)
+    2. **CSV/Excel** - Upload traditional data file
+    3. **Manual Entry** - Add elements one by one
     
-    **Bright:** red, blue, green, yellow, orange, purple, cyan, magenta, lime, pink
+    ### 📊 CSV/Excel Format
     
-    **Standard:** brown, gray, olive, navy, teal, maroon, coral, gold, indigo, and 30+ more
+    | Column | Description | Example |
+    |--------|-------------|---------|
+    | Element | Name of genetic element | "Promoter", "GeneX" |
+    | Start | Start position in bp | 100, 1500 |
+    | End | End position in bp | 300, 2000 |
+    | Box position | "Up" or "Down" | Up, Down |
+    | Colour | Color name | blue, lightgreen, coral |
+    | Arrow end type | "arrow" or "flat" | arrow, flat |
     
-    ## Troubleshooting
+    ### 🎨 Tips
     
-    **BioPython not found?**
-    ```bash
-    pip install biopython
-    ```
-    
-    **No features extracted?**
-    - Check file is valid GenBank format
-    - File might only contain 'source' feature
-    - Check features have qualifiers (`/label=`, `/gene=`, etc.)
-    
-    **Elements overlapping?**
-    - Increase font size
-    - Use vertical text orientation
-    - Use region selection for focused view
-    
-    **Need help?**
-    Contact your lab coordinator or check the documentation files.
+    - **GenBank files**: Colors assigned randomly, but you can change them
+    - **Color swatches**: Check the color preview to match your scheme
+    - **Region view**: Focus on specific gene clusters
+    - **Vertical text**: Better for long element names
+    - **Size labels**: Shows element length instead of coordinates
+    - **Mix colors**: Use pastels for most, bright for key elements
     """)
 
 # Footer
 st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: gray;'>
-    🧬 Plasmid Map Generator v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke
+<div style='text-align: center'>
+    <p>🧬 Plasmid Map Generator  v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP | Created by Alicia Clarke </p>
+    <p><small>Supports .gb, .csv, .xlsx • Region selection • Size display • Color swatches • Custom colors</small></p>
 </div>
 """, unsafe_allow_html=True)
