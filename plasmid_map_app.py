@@ -209,7 +209,7 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
     ax.plot([plot_start, plot_end], [0, 0], 'k-', linewidth=3)
     
     box_height = 80
-    text_distance = 250
+    text_distance = 120  # Reduced from 250 for more compact figure
     
     for _, row in df.iterrows():
         element = row['Element']
@@ -278,7 +278,7 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
     
     # Set axis properties
     ax.set_xlim(plot_start - 500, plot_end + 500)
-    y_max = max(box_height + text_distance + 200, 800)
+    y_max = max(box_height + text_distance + 100, 400)  # Reduced padding for compact view
     ax.set_ylim(-y_max, y_max)
     ax.axis('off')
     
