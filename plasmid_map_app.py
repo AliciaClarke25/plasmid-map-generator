@@ -119,8 +119,17 @@ def parse_genbank_file(uploaded_file):
             # Assign random pastel color
             color = np.random.choice(PASTEL_COLORS)
             
-            # Smart positioning: misc_feature defaults to Down, others to Up
-            position = "Down" if feature.type.lower() == 'misc_feature' else "Up"
+            # Smart positioning based on strand direction:
+            # Forward strand (+1) = Up
+            # Reverse strand/complement (-1) = Down
+            # If strand info missing, use old logic (misc_feature = Down, others = Up)
+            if strand == -1:
+                position = "Down"
+            elif strand == 1:
+                position = "Up"
+            else:
+                # Fallback for features without strand info
+                position = "Down" if feature.type.lower() == 'misc_feature' else "Up"
             
             elements_data.append({
                 'Element': name,
@@ -361,6 +370,8 @@ with tab1:
                     st.session_state.position_prefs = {}
                 if 'enabled_elements' not in st.session_state:
                     st.session_state.enabled_elements = {}
+                if 'edited_labels' not in st.session_state:
+                    st.session_state.edited_labels = {}
                 
                 # Initialize enabled state for all elements using unique keys
                 for idx, row in df.iterrows():
@@ -368,6 +379,9 @@ with tab1:
                     unique_key = f"{idx}_{element}"
                     if unique_key not in st.session_state.enabled_elements:
                         st.session_state.enabled_elements[unique_key] = True
+                    # Initialize edited labels with original element name
+                    if unique_key not in st.session_state.edited_labels:
+                        st.session_state.edited_labels[unique_key] = element
                 
                 # Region selection
                 st.markdown("---")
@@ -397,6 +411,25 @@ with tab1:
                 st.subheader("🎨 Customize Elements")
                 
                 with st.expander("Customize individual element colors, positions, and visibility"):
+                    # Initialize edited labels dict if not exists
+                    if 'edited_labels' not in st.session_state:
+                        st.session_state.edited_labels = {}
+                    
+                    # Add column headers
+                    header_cols = st.columns([3, 2, 2, 2, 1])
+                    with header_cols[0]:
+                        st.markdown("**Original Name**")
+                    with header_cols[1]:
+                        st.markdown("**Display Label**")
+                    with header_cols[2]:
+                        st.markdown("**Color**")
+                    with header_cols[3]:
+                        st.markdown("**Position**")
+                    with header_cols[4]:
+                        st.markdown("**Show**")
+                    
+                    st.markdown("---")
+                    
                     for idx, row in df.iterrows():
                         element = row['Element']
                         is_promoter = row.get('IsPromoter', False)
@@ -406,29 +439,54 @@ with tab1:
                         unique_key = f"{idx}_{element}"
                         
                         # Create columns for each element's controls
-                        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
                         
                         with col1:
-                            # Show element name with promoter indicator
+                            # Show element name with promoter indicator and strand info
                             if is_promoter:
                                 arrow_symbol = "→" if strand >= 0 else "←"
-                                st.markdown(f"**{element}** {arrow_symbol} (Promoter)")
+                                strand_info = "forward" if strand >= 0 else "reverse"
+                                st.markdown(f"**{element}** {arrow_symbol} (Promoter, {strand_info})")
                             else:
-                                st.markdown(f"**{element}**")
+                                strand_info = "forward" if strand >= 0 else "reverse"
+                                st.markdown(f"**{element}** ({strand_info})")
                         
                         with col2:
-                            # Color selector
+                            # Editable label
+                            current_label = st.session_state.edited_labels.get(unique_key, element)
+                            new_label = st.text_input(
+                                "Label",
+                                value=current_label,
+                                key=f"label_{unique_key}",
+                                label_visibility="collapsed",
+                                placeholder="Edit label..."
+                            )
+                            st.session_state.edited_labels[unique_key] = new_label
+                        
+                        with col3:
+                            # Color selector with preview
                             current_color = st.session_state.color_prefs.get(unique_key, row['Color'])
+                            
+                            # Create color options with color swatches
+                            color_options = []
+                            for color in ALL_COLORS:
+                                # Create a colored square emoji representation
+                                color_options.append(color)
+                            
                             new_color = st.selectbox(
                                 f"Color",
                                 options=ALL_COLORS,
                                 index=ALL_COLORS.index(current_color) if current_color in ALL_COLORS else 0,
                                 key=f"color_{unique_key}",
-                                label_visibility="collapsed"
+                                label_visibility="collapsed",
+                                format_func=lambda x: f"⬛ {x}"
                             )
                             st.session_state.color_prefs[unique_key] = new_color
+                            
+                            # Show color preview below dropdown
+                            st.markdown(f'<div style="background-color: {new_color}; width: 100%; height: 20px; border: 1px solid black; border-radius: 3px;"></div>', unsafe_allow_html=True)
                         
-                        with col3:
+                        with col4:
                             # Position selector
                             current_position = st.session_state.position_prefs.get(unique_key, row['Position'])
                             new_position = st.selectbox(
@@ -440,7 +498,7 @@ with tab1:
                             )
                             st.session_state.position_prefs[unique_key] = new_position
                         
-                        with col4:
+                        with col5:
                             # Enable/disable checkbox
                             enabled = st.checkbox(
                                 "Show",
@@ -455,8 +513,15 @@ with tab1:
                     element = row['Element']
                     unique_key = f"{idx}_{element}"
                     
+                    # Apply edited labels
+                    if unique_key in st.session_state.edited_labels:
+                        df_display.loc[idx, 'Element'] = st.session_state.edited_labels[unique_key]
+                    
+                    # Apply color preferences
                     if unique_key in st.session_state.color_prefs:
                         df_display.loc[idx, 'Color'] = st.session_state.color_prefs[unique_key]
+                    
+                    # Apply position preferences
                     if unique_key in st.session_state.position_prefs:
                         df_display.loc[idx, 'Position'] = st.session_state.position_prefs[unique_key]
                 
@@ -473,6 +538,8 @@ with tab1:
                 # Show feature table
                 st.markdown("---")
                 st.subheader("📋 Feature Table")
+                
+                # Create display dataframe with edited labels
                 display_df = df_display[['Element', 'Start', 'End', 'Color', 'Position', 'IsPromoter']].copy()
                 display_df['IsPromoter'] = display_df['IsPromoter'].apply(lambda x: '✓' if x else '')
                 display_df.columns = ['Element Name', 'Start (bp)', 'End (bp)', 'Color', 'Box Position', 'Promoter']
