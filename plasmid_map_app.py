@@ -209,7 +209,22 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
     ax.plot([plot_start, plot_end], [0, 0], 'k-', linewidth=3)
     
     box_height = 80
-    text_distance = 120  # Reduced from 250 for more compact figure
+    text_distance = 120  # Distance from box to line endpoint
+    text_gap = 30  # Gap between line endpoint and text start
+    
+    # For horizontal text, create staggered levels to avoid overlap
+    if text_orientation == 'horizontal':
+        # Sort elements by position to assign levels
+        df_sorted = df.sort_values('Start').reset_index(drop=True)
+        element_levels = {}
+        num_levels = 3  # Use 3 different height levels
+        
+        for idx, row in df_sorted.iterrows():
+            element = row['Element']
+            position = row['Position']
+            # Cycle through levels based on index
+            level = idx % num_levels
+            element_levels[element] = level
     
     for _, row in df.iterrows():
         element = row['Element']
@@ -224,15 +239,34 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
         center = (start + end) / 2
         width = end - start
         
-        # Determine y position
-        if position == "Up":
-            box_y = box_height / 2
-            text_y = box_height + text_distance
-            position_y = box_height + 30
+        # Calculate element size for label
+        element_size = end - start + 1
+        size_label = f" ({element_size} bp)" if show_positions else ""
+        
+        # Determine y position and line height
+        if text_orientation == 'horizontal':
+            # Use staggered levels for horizontal text
+            level = element_levels.get(element, 0)
+            level_multiplier = 1 + (level * 0.3)  # Stagger at 1x, 1.3x, 1.6x height
+            
+            if position == "Up":
+                box_y = box_height / 2
+                line_end_y = box_height + (text_distance * level_multiplier)
+                text_y = line_end_y + text_gap
+            else:
+                box_y = -box_height / 2
+                line_end_y = -box_height - (text_distance * level_multiplier)
+                text_y = line_end_y - text_gap
         else:
-            box_y = -box_height / 2
-            text_y = -box_height - text_distance
-            position_y = -box_height - 30
+            # Vertical text - no staggering needed
+            if position == "Up":
+                box_y = box_height / 2
+                line_end_y = box_height + text_distance
+                text_y = line_end_y + text_gap
+            else:
+                box_y = -box_height / 2
+                line_end_y = -box_height - text_distance
+                text_y = line_end_y - text_gap
         
         # Draw arrow for promoters, rectangle for others
         if is_promoter:
@@ -249,36 +283,58 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
                                     linewidth=1.5, edgecolor='black', facecolor=color)
             ax.add_patch(rect)
         
-        # Draw vertical line connecting box to label
-        ax.plot([center, center], [box_y, text_y], 'k-', linewidth=1.5)
+        # Draw vertical line connecting box to text (now stops before text)
+        ax.plot([center, center], [box_y, line_end_y], 'k-', linewidth=1.5)
         
-        # Add element name with rotation if vertical
+        # Add element name with size in brackets (if enabled)
+        # Element name in black, size in grey brackets
         if text_orientation == 'vertical':
             # For vertical text (rotated 90°), alignment works differently
-            # ha='left' means text extends upward after rotation (for Up position)
-            # ha='right' means text extends downward after rotation (for Down position)
             if position == "Up":
+                # Draw element name in black
                 ax.text(center, text_y, element, ha='left', va='center',
-                       fontsize=label_font, rotation=90, rotation_mode='anchor')
+                       fontsize=label_font, rotation=90, rotation_mode='anchor',
+                       color='black')
+                # Draw size in grey if enabled
+                if show_positions:
+                    text_width = len(element) * label_font * 0.6  # Approximate text width after rotation
+                    ax.text(center, text_y + text_width + 5, size_label, ha='left', va='center',
+                           fontsize=label_font, rotation=90, rotation_mode='anchor',
+                           color='grey')
             else:
+                # Draw element name in black
                 ax.text(center, text_y, element, ha='right', va='center',
-                       fontsize=label_font, rotation=90, rotation_mode='anchor')
+                       fontsize=label_font, rotation=90, rotation_mode='anchor',
+                       color='black')
+                # Draw size in grey if enabled
+                if show_positions:
+                    text_width = len(element) * label_font * 0.6
+                    ax.text(center, text_y - text_width - 5, size_label, ha='right', va='center',
+                           fontsize=label_font, rotation=90, rotation_mode='anchor',
+                           color='grey')
         else:
-            ax.text(center, text_y, element, ha='center', va='bottom' if position == "Up" else 'top',
-                   fontsize=label_font)
-        
-        # Add position labels if requested (showing element size)
-        if show_positions:
-            element_size = end - start + 1  # Calculate size in bp
-            position_label = f"{element_size} bp"
-            position_font = max(label_font - 3, 6)
-            ax.text(center, position_y, position_label, ha='center', 
-                   va='bottom' if position == "Up" else 'top',
-                   fontsize=position_font, color='grey')
+            # Horizontal text
+            va_align = 'bottom' if position == "Up" else 'top'
+            
+            # Draw element name in black
+            ax.text(center, text_y, element, ha='center', va=va_align,
+                   fontsize=label_font, color='black')
+            
+            # Draw size in grey brackets next to element name if enabled
+            if show_positions:
+                # Position size label right next to element name
+                element_width = len(element) * label_font * 0.6  # Approximate text width
+                size_x = center + element_width / 2 + 5
+                ax.text(size_x, text_y, size_label, ha='left', va=va_align,
+                       fontsize=label_font, color='grey')
     
-    # Set axis properties
+    # Set axis properties - adjust y limits for staggered text
     ax.set_xlim(plot_start - 500, plot_end + 500)
-    y_max = max(box_height + text_distance + 100, 400)  # Reduced padding for compact view
+    if text_orientation == 'horizontal':
+        # Need more vertical space for staggered levels
+        y_max = max(box_height + text_distance * 2 + text_gap + 100, 600)
+    else:
+        y_max = max(box_height + text_distance + text_gap + 100, 400)
     ax.set_ylim(-y_max, y_max)
     ax.axis('off')
     
@@ -309,7 +365,7 @@ label_font = st.sidebar.slider("Label Font Size", 8, 20, 11)
 text_orientation = st.sidebar.radio("Element Name Orientation", 
                                     options=['horizontal', 'vertical'],
                                     index=0)
-show_positions = st.sidebar.checkbox("Show Element Sizes (bp)", value=False)
+show_positions = st.sidebar.checkbox("Show Element Sizes (in brackets)", value=False)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎨 Color Palette Reference")
@@ -333,11 +389,12 @@ with tab1:
     **Features:**
     - ✅ Automatic feature parsing
     - ✅ Arrow-shaped promoter boxes (pointing based on strand direction)
-    - ✅ Individual color customization
-    - ✅ Show/hide specific elements
+    - ✅ Individual color customization with preview
+    - ✅ Show/hide specific elements (with Select/Deselect All)
     - ✅ Region selection
     - ✅ Editable element labels
-    - ✅ Element size labels (in bp)
+    - ✅ Element sizes in brackets (grey text)
+    - ✅ Staggered horizontal labels (no overlap!)
     - ✅ Smart positioning (strand-based)
     - ✅ High resolution output (500 DPI)
     """)
@@ -412,6 +469,24 @@ with tab1:
                 # Customization section
                 st.markdown("---")
                 st.subheader("🎨 Customize Elements")
+                
+                # Add Select All / Deselect All buttons
+                col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 4])
+                with col_btn1:
+                    if st.button("✅ Select All", use_container_width=True):
+                        for idx, row in df.iterrows():
+                            element = row['Element']
+                            unique_key = f"{idx}_{element}"
+                            st.session_state.enabled_elements[unique_key] = True
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.button("❌ Deselect All", use_container_width=True):
+                        for idx, row in df.iterrows():
+                            element = row['Element']
+                            unique_key = f"{idx}_{element}"
+                            st.session_state.enabled_elements[unique_key] = False
+                        st.rerun()
                 
                 with st.expander("Customize individual element colors, positions, and visibility"):
                     # Initialize edited labels dict if not exists
@@ -801,8 +876,10 @@ with tab4:
     3. Generate map showing only that region
     
     ### Advanced Features
-    - **Position Labels:** Show element sizes in bp (e.g., "792 bp")
-    - **Text Orientation:** Horizontal (default) or vertical
+    - **Element Sizes:** Show sizes in grey brackets next to element names (e.g., "GFP (720 bp)")
+    - **Text Orientation:** Horizontal (staggered to avoid overlap) or vertical
+    - **Select/Deselect All:** Quickly show or hide all elements at once
+    - **Staggered Labels:** Horizontal labels at different heights to prevent overlap
     - **High Resolution:** 500 DPI output for publications
     
     ## CSV/Excel Input
@@ -863,6 +940,6 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
-    🧬 Plasmid Map Generator v1.0 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP 
+    🧬 Plasmid Map Generator v1.1 | Dunkelmann Lab | Plant Synthetic Biology at MPI-MP 
 </div>
 """, unsafe_allow_html=True)
