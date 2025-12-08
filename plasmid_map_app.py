@@ -295,10 +295,12 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
                 ax.text(center, text_y, element, ha='left', va='center',
                        fontsize=label_font, rotation=90, rotation_mode='anchor',
                        color='black')
-                # Draw size in grey if enabled
+                # Draw size in grey if enabled - positioned after the element name
                 if show_positions:
-                    text_width = len(element) * label_font * 0.6  # Approximate text width after rotation
-                    ax.text(center, text_y + text_width + 5, size_label, ha='left', va='center',
+                    # Estimate vertical text height for positioning
+                    char_height_approx = label_font * 0.7
+                    text_length = len(element) * char_height_approx
+                    ax.text(center, text_y + text_length + 10, size_label, ha='left', va='center',
                            fontsize=label_font, rotation=90, rotation_mode='anchor',
                            color='grey')
             else:
@@ -308,25 +310,42 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
                        color='black')
                 # Draw size in grey if enabled
                 if show_positions:
-                    text_width = len(element) * label_font * 0.6
-                    ax.text(center, text_y - text_width - 5, size_label, ha='right', va='center',
+                    char_height_approx = label_font * 0.7
+                    text_length = len(element) * char_height_approx
+                    ax.text(center, text_y - text_length - 10, size_label, ha='right', va='center',
                            fontsize=label_font, rotation=90, rotation_mode='anchor',
                            color='grey')
         else:
             # Horizontal text
             va_align = 'bottom' if position == "Up" else 'top'
             
-            # Draw element name in black
-            ax.text(center, text_y, element, ha='center', va=va_align,
-                   fontsize=label_font, color='black')
-            
-            # Draw size in grey brackets next to element name if enabled
             if show_positions:
-                # Position size label right next to element name
-                element_width = len(element) * label_font * 0.6  # Approximate text width
-                size_x = center + element_width / 2 + 5
-                ax.text(size_x, text_y, size_label, ha='left', va=va_align,
+                # Create combined text: element name (black) + size (grey)
+                # Use two separate text objects positioned carefully
+                
+                # Draw element name in black
+                text_obj = ax.text(center, text_y, element, ha='center', va=va_align,
+                                  fontsize=label_font, color='black')
+                
+                # Calculate approximate width of element name
+                # More accurate estimation: ~0.5-0.6 of font size per character on average
+                char_width_approx = label_font * 0.5
+                element_width_pixels = len(element) * char_width_approx
+                
+                # Position size label to the right of element name with spacing
+                # Convert pixel spacing to data coordinates (approximate)
+                x_range = plot_end - plot_start
+                pixels_to_data = x_range / (14 * 72)  # 14 inches * 72 dpi
+                spacing_data = 8 * pixels_to_data  # 8 pixel spacing
+                size_x_offset = element_width_pixels * pixels_to_data / 2 + spacing_data
+                
+                # Draw size in grey brackets
+                ax.text(center + size_x_offset, text_y, size_label, ha='left', va=va_align,
                        fontsize=label_font, color='grey')
+            else:
+                # Just element name, no size
+                ax.text(center, text_y, element, ha='center', va=va_align,
+                       fontsize=label_font, color='black')
     
     # Set axis properties - adjust y limits for staggered text
     ax.set_xlim(plot_start - 500, plot_end + 500)
@@ -473,20 +492,18 @@ with tab1:
                 # Add Select All / Deselect All buttons
                 col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 4])
                 with col_btn1:
-                    if st.button("✅ Select All", use_container_width=True):
+                    if st.button("✅ Select All", use_container_width=True, key="select_all_btn"):
                         for idx, row in df.iterrows():
                             element = row['Element']
                             unique_key = f"{idx}_{element}"
                             st.session_state.enabled_elements[unique_key] = True
-                        st.rerun()
                 
                 with col_btn2:
-                    if st.button("❌ Deselect All", use_container_width=True):
+                    if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_btn"):
                         for idx, row in df.iterrows():
                             element = row['Element']
                             unique_key = f"{idx}_{element}"
                             st.session_state.enabled_elements[unique_key] = False
-                        st.rerun()
                 
                 with st.expander("Customize individual element colors, positions, and visibility"):
                     # Initialize edited labels dict if not exists
