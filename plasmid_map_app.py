@@ -287,32 +287,28 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
         ax.plot([center, center], [box_y, line_end_y], 'k-', linewidth=1.5)
         
         # Add element name with size in brackets (if enabled)
-        # Element name in black, size in grey brackets
         if text_orientation == 'vertical':
-            # For vertical text (rotated 90°), alignment works differently
+            # For vertical text (rotated 90°)
             if position == "Up":
-                # Draw element name in black
+                # Draw element name
                 ax.text(center, text_y, element, ha='left', va='center',
                        fontsize=label_font, rotation=90, rotation_mode='anchor',
                        color='black')
-                # Draw size in grey if enabled - positioned after the element name
+                # Add size if enabled
                 if show_positions:
-                    # Estimate vertical text height for positioning
-                    char_height_approx = label_font * 0.7
-                    text_length = len(element) * char_height_approx
-                    ax.text(center, text_y + text_length + 10, size_label, ha='left', va='center',
+                    offset_y = len(element) * label_font * 0.7 + 15
+                    ax.text(center, text_y + offset_y, size_label, ha='left', va='center',
                            fontsize=label_font, rotation=90, rotation_mode='anchor',
                            color='grey')
             else:
-                # Draw element name in black
+                # Draw element name
                 ax.text(center, text_y, element, ha='right', va='center',
                        fontsize=label_font, rotation=90, rotation_mode='anchor',
                        color='black')
-                # Draw size in grey if enabled
+                # Add size if enabled
                 if show_positions:
-                    char_height_approx = label_font * 0.7
-                    text_length = len(element) * char_height_approx
-                    ax.text(center, text_y - text_length - 10, size_label, ha='right', va='center',
+                    offset_y = len(element) * label_font * 0.7 + 15
+                    ax.text(center, text_y - offset_y, size_label, ha='right', va='center',
                            fontsize=label_font, rotation=90, rotation_mode='anchor',
                            color='grey')
         else:
@@ -320,28 +316,17 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
             va_align = 'bottom' if position == "Up" else 'top'
             
             if show_positions:
-                # Create combined text: element name (black) + size (grey)
-                # Use two separate text objects positioned carefully
+                # Draw element name in black, centered
+                ax.text(center, text_y, element, ha='center', va=va_align,
+                       fontsize=label_font, color='black')
                 
-                # Draw element name in black
-                text_obj = ax.text(center, text_y, element, ha='center', va=va_align,
-                                  fontsize=label_font, color='black')
-                
-                # Calculate approximate width of element name
-                # More accurate estimation: ~0.5-0.6 of font size per character on average
-                char_width_approx = label_font * 0.5
-                element_width_pixels = len(element) * char_width_approx
-                
-                # Position size label to the right of element name with spacing
-                # Convert pixel spacing to data coordinates (approximate)
-                x_range = plot_end - plot_start
-                pixels_to_data = x_range / (14 * 72)  # 14 inches * 72 dpi
-                spacing_data = 8 * pixels_to_data  # 8 pixel spacing
-                size_x_offset = element_width_pixels * pixels_to_data / 2 + spacing_data
-                
-                # Draw size in grey brackets
-                ax.text(center + size_x_offset, text_y, size_label, ha='left', va=va_align,
-                       fontsize=label_font, color='grey')
+                # Draw size in grey using offset from the element name position
+                # Use textcoords='offset points' for pixel-based positioning
+                ax.annotate(size_label, xy=(center, text_y), 
+                           xytext=(len(element)*label_font*0.3 + 10, 0),  # Offset in points (pixels)
+                           textcoords='offset points',
+                           ha='left', va=va_align,
+                           fontsize=label_font, color='grey')
             else:
                 # Just element name, no size
                 ax.text(center, text_y, element, ha='center', va=va_align,
@@ -485,6 +470,10 @@ with tab1:
                                                     value=min(1000, plasmid_length),
                                                     key='region_end_gb')
                 
+                # Initialize checkbox refresh counter if not exists
+                if 'checkbox_refresh' not in st.session_state:
+                    st.session_state.checkbox_refresh = 0
+                
                 # Customization section
                 st.markdown("---")
                 st.subheader("🎨 Customize Elements")
@@ -497,6 +486,7 @@ with tab1:
                             element = row['Element']
                             unique_key = f"{idx}_{element}"
                             st.session_state.enabled_elements[unique_key] = True
+                        st.session_state.checkbox_refresh += 1  # Force checkbox recreation
                 
                 with col_btn2:
                     if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_btn"):
@@ -504,6 +494,7 @@ with tab1:
                             element = row['Element']
                             unique_key = f"{idx}_{element}"
                             st.session_state.enabled_elements[unique_key] = False
+                        st.session_state.checkbox_refresh += 1  # Force checkbox recreation
                 
                 with st.expander("Customize individual element colors, positions, and visibility"):
                     # Initialize edited labels dict if not exists
@@ -591,11 +582,12 @@ with tab1:
                             st.session_state.position_prefs[unique_key] = new_position
                         
                         with col5:
-                            # Enable/disable checkbox
+                            # Enable/disable checkbox with refresh counter in key
+                            current_enabled = st.session_state.enabled_elements.get(unique_key, True)
                             enabled = st.checkbox(
                                 "Show",
-                                value=st.session_state.enabled_elements.get(unique_key, True),
-                                key=f"enabled_{unique_key}"
+                                value=current_enabled,
+                                key=f"enabled_{unique_key}_{st.session_state.checkbox_refresh}"
                             )
                             st.session_state.enabled_elements[unique_key] = enabled
                 
