@@ -296,7 +296,7 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
                        color='black')
                 # Add size if enabled
                 if show_positions:
-                    offset_y = len(element) * label_font * 0.7 + 15
+                    offset_y = len(element) * label_font * 0.7 + 10
                     ax.text(center, text_y + offset_y, size_label, ha='left', va='center',
                            fontsize=label_font, rotation=90, rotation_mode='anchor',
                            color='grey')
