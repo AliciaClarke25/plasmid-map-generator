@@ -247,7 +247,7 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
         if text_orientation == 'horizontal':
             # Use staggered levels for horizontal text
             level = element_levels.get(element, 0)
-            level_multiplier = 1 + (level * 0.3)  # Stagger at 1x, 1.3x, 1.6x height
+            level_multiplier = 1 + (level * 0.6)  # Stagger at 1x, 1.6x, 2.2x height (more spacing!)
             
             if position == "Up":
                 box_y = box_height / 2
@@ -335,8 +335,8 @@ def create_plasmid_map(df, plasmid_length, label_font=11, show_positions=False,
     # Set axis properties - adjust y limits for staggered text
     ax.set_xlim(plot_start - 500, plot_end + 500)
     if text_orientation == 'horizontal':
-        # Need more vertical space for staggered levels
-        y_max = max(box_height + text_distance * 2 + text_gap + 100, 600)
+        # Need more vertical space for staggered levels (up to 2.2x multiplier)
+        y_max = max(box_height + text_distance * 2.5 + text_gap + 100, 700)
     else:
         y_max = max(box_height + text_distance + text_gap + 100, 400)
     ax.set_ylim(-y_max, y_max)
